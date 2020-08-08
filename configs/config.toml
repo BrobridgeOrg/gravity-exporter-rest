@@ -1,0 +1,7 @@
+[service]
+port = 44144
+
+[rest]
+method = "post"
+uri = "http://0.0.0.0:8080"
+headers = {}
