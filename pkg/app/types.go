@@ -1,11 +1,6 @@
 package app
 
-import (
-	"github.com/BrobridgeOrg/gravity-exporter-rest/pkg/grpc_server"
-	"github.com/BrobridgeOrg/gravity-exporter-rest/pkg/mux_manager"
-)
+import ()
 
 type App interface {
-	GetGRPCServer() grpc_server.Server
-	GetMuxManager() mux_manager.Manager
 }

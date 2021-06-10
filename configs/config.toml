@@ -1,7 +1,13 @@
-[service]
-port = 44144
+[gravity]
+host = "0.0.0.0:32803"
 
-[rest]
-method = "post"
-uri = "http://0.0.0.0:8080"
-headers = {}
+[subscriber]
+subscriber_id = "rest_exporter"
+subscriber_name = "REST Exporter"
+state_store = "./statestore"
+worker_count = 4
+verbose = true
+
+[rules]
+subscription = "./settings/subscriptions.json"
+
