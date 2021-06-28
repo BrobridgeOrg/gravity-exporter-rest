@@ -8,6 +8,8 @@ subscriber_name = "REST Exporter"
 state_store = "./statestore"
 worker_count = 4
 verbose = true
+pipeline_start = 0
+pipeline_end = -1
 
 [rules]
 subscription = "./settings/subscriptions.json"
