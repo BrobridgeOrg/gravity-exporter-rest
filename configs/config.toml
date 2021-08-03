@@ -3,13 +3,13 @@ domain = "gravity"
 host = "0.0.0.0:32803"
 
 [subscriber]
-subscriber_id = "rest_exporter"
-subscriber_name = "REST Exporter"
-state_store = "./statestore"
-worker_count = 4
+subscriberID = "rest_exporter"
+subscriberName = "REST Exporter"
+stateStore = "./statestore"
+workerCount = 4
 verbose = true
-pipeline_start = 0
-pipeline_end = -1
+pipelineStart = 0
+pipelineEnd = -1
 
 [rules]
 subscription = "./settings/subscriptions.json"
