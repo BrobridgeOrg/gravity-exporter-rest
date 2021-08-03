@@ -11,6 +11,10 @@ verbose = true
 pipelineStart = 0
 pipelineEnd = -1
 
+# Authentication
+appID = "anonymous"
+accessKey = ""
+
 [rules]
 subscription = "./settings/subscriptions.json"
 
