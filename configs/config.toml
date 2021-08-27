@@ -7,6 +7,7 @@ subscriberID = "rest_exporter"
 subscriberName = "REST Exporter"
 stateStore = "./statestore"
 workerCount = 4
+chunkSize = 2048
 verbose = true
 pipelineStart = 0
 pipelineEnd = -1
@@ -14,6 +15,10 @@ pipelineEnd = -1
 # Authentication
 appID = "anonymous"
 accessKey = ""
+
+[initialLoad]
+enabled = true
+omittedCount = 100000
 
 [rules]
 subscription = "./settings/subscriptions.json"

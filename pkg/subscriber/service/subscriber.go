@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -18,7 +17,10 @@ import (
 	"github.com/BrobridgeOrg/gravity-sdk/core/keyring"
 	gravity_subscriber "github.com/BrobridgeOrg/gravity-sdk/subscriber"
 	gravity_state_store "github.com/BrobridgeOrg/gravity-sdk/subscriber/state_store"
-	gravity_sdk_types_projection "github.com/BrobridgeOrg/gravity-sdk/types/projection"
+	gravity_sdk_types_record "github.com/BrobridgeOrg/gravity-sdk/types/record"
+
+	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
@@ -29,9 +31,16 @@ var transport = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }
 
-var projectionPool = sync.Pool{
+type Packet struct {
+	EventName  string                 `json:"event"`
+	Collection string                 `json:"collection"`
+	Payload    map[string]interface{} `json:"payload"`
+	Meta       map[string]interface{} `json:"meta"`
+}
+
+var packetPool = sync.Pool{
 	New: func() interface{} {
-		return &gravity_sdk_types_projection.Projection{}
+		return &Packet{}
 	},
 }
 
@@ -57,19 +66,14 @@ func (subscriber *Subscriber) processData(msg *gravity_subscriber.Message) error
 		}
 	*/
 
-	pj := projectionPool.Get().(*gravity_sdk_types_projection.Projection)
-	defer projectionPool.Put(pj)
-
-	// Parsing data
-	err := gravity_sdk_types_projection.Unmarshal(msg.Event.Data, pj)
-	if err != nil {
-		return err
-	}
+	event := msg.Payload.(*gravity_subscriber.DataEvent)
+	pj := event.Payload
 
 	// Getting channels for specific collection
 	restRules, ok := subscriber.ruleConfig.Subscriptions[pj.Collection]
 	if !ok {
-		return errors.New("Getting channels for specific collection error.")
+		// skip
+		return nil
 	}
 
 	// Convert projection to record
@@ -193,6 +197,9 @@ func (subscriber *Subscriber) Init() error {
 	options.Domain = domain
 	options.StateStore = subscriber.stateStore
 	options.WorkerCount = viper.GetInt("subscriber.workerCount")
+	options.ChunkSize = viper.GetInt("subscriber.chunkSize")
+	options.InitialLoad.Enabled = viper.GetBool("initialLoad.enabled")
+	options.InitialLoad.OmittedCount = viper.GetUint64("initialLoad.omittedCount")
 
 	// Loading access key
 	viper.SetDefault("subscriber.appID", "anonymous")
@@ -208,6 +215,7 @@ func (subscriber *Subscriber) Init() error {
 
 	// Setup data handler
 	subscriber.subscriber.SetEventHandler(subscriber.eventHandler)
+	subscriber.subscriber.SetSnapshotHandler(subscriber.snapshotHandler)
 
 	// Register subscriber
 	log.Info("Registering subscriber")
@@ -304,6 +312,108 @@ func (subscriber *Subscriber) eventHandler(msg *gravity_subscriber.Message) {
 		log.Error(err)
 		return
 	}
+}
+
+func (subscriber *Subscriber) snapshotHandler(msg *gravity_subscriber.Message) {
+
+	event := msg.Payload.(*gravity_subscriber.SnapshotEvent)
+	snapshotRecord := event.Payload
+
+	// Getting tables for specific collection
+	restRules, ok := subscriber.ruleConfig.Subscriptions[event.Collection]
+	if !ok {
+		return
+	}
+
+	// Prepare record for event
+	var record gravity_sdk_types_record.Record
+	err := gravity_sdk_types_record.UnmarshalMapData(snapshotRecord.Payload.AsMap(), &record)
+	if err != nil {
+		log.Error(err)
+		return
+	}
+
+	// Send event to each channel
+	for _, restRule := range restRules {
+
+		var rs gravity_sdk_types_record.Record
+		copier.Copy(&rs, record)
+
+		// Getting parameters
+		method := strings.ToUpper(restRule.Method)
+		uri := restRule.Uri
+
+		// TODO: using batch mechanism to improve performance
+		packet := packetPool.Get().(*Packet)
+		for {
+			//Scanning fields
+			payload := make(map[string]interface{}, len(rs.Fields))
+			for _, field := range rs.Fields {
+				key := field.Name
+				value := gravity_sdk_types_record.GetValue(field.Value)
+				payload[key] = value
+			}
+
+			packet.EventName = "snapshot"
+			packet.Payload = payload
+			packet.Collection = event.Collection
+
+			if snapshotRecord.Meta != nil {
+				packet.Meta = snapshotRecord.Meta.AsMap()
+			}
+
+			//convert to byte
+			newPacket, err := jsoniter.Marshal(packet)
+			if err != nil {
+				log.Error(err)
+				<-time.After(time.Second * 5)
+				continue
+			}
+
+			// Create a request
+			request, err := http.NewRequest(method, uri, bytes.NewReader(newPacket))
+			if err != nil {
+				log.Error(err)
+				<-time.After(time.Second * 5)
+				continue
+			}
+
+			// Preparing header
+			request.Header.Add("Gravity-Version", "1.0")
+			request.Header.Add("Content-Type", "application/json")
+			for key, value := range restRule.Headers {
+				request.Header.Add(key, value)
+			}
+
+			client := http.Client{
+				Transport: transport,
+			}
+			resp, err := client.Do(request)
+			if err != nil {
+				log.Error(err)
+				<-time.After(time.Second * 5)
+				continue
+			}
+
+			// Require body
+			defer resp.Body.Close()
+
+			_, err = ioutil.ReadAll(resp.Body)
+			if err != nil {
+				log.Error(err)
+				<-time.After(time.Second * 5)
+				continue
+			}
+
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				log.Error("Target HTTP server return with error status code")
+				<-time.After(time.Second * 5)
+				continue
+			}
+			break
+		}
+	}
+	msg.Ack()
 }
 
 func (subscriber *Subscriber) Run() error {
