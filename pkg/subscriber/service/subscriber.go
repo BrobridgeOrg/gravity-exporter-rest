@@ -17,9 +17,7 @@ import (
 	"github.com/BrobridgeOrg/gravity-sdk/core/keyring"
 	gravity_subscriber "github.com/BrobridgeOrg/gravity-sdk/subscriber"
 	gravity_state_store "github.com/BrobridgeOrg/gravity-sdk/subscriber/state_store"
-	gravity_sdk_types_record "github.com/BrobridgeOrg/gravity-sdk/types/record"
 
-	"github.com/jinzhu/copier"
 	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -325,19 +323,8 @@ func (subscriber *Subscriber) snapshotHandler(msg *gravity_subscriber.Message) {
 		return
 	}
 
-	// Prepare record for event
-	var record gravity_sdk_types_record.Record
-	err := gravity_sdk_types_record.UnmarshalMapData(snapshotRecord.Payload.AsMap(), &record)
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
 	// Send event to each channel
 	for _, restRule := range restRules {
-
-		var rs gravity_sdk_types_record.Record
-		copier.Copy(&rs, record)
 
 		// Getting parameters
 		method := strings.ToUpper(restRule.Method)
@@ -346,13 +333,7 @@ func (subscriber *Subscriber) snapshotHandler(msg *gravity_subscriber.Message) {
 		// TODO: using batch mechanism to improve performance
 		packet := packetPool.Get().(*Packet)
 		for {
-			//Scanning fields
-			payload := make(map[string]interface{}, len(rs.Fields))
-			for _, field := range rs.Fields {
-				key := field.Name
-				value := gravity_sdk_types_record.GetValue(field.Value)
-				payload[key] = value
-			}
+			payload := snapshotRecord.Payload.AsMap()
 
 			packet.EventName = "snapshot"
 			packet.Payload = payload
