@@ -391,6 +391,8 @@ func (subscriber *Subscriber) snapshotHandler(msg *gravity_subscriber.Message) {
 				<-time.After(time.Second * 5)
 				continue
 			}
+
+			packetPool.Put(packet)
 			break
 		}
 	}
