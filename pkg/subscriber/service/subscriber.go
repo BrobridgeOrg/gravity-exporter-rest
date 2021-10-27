@@ -17,6 +17,7 @@ import (
 	"github.com/BrobridgeOrg/gravity-sdk/core/keyring"
 	gravity_subscriber "github.com/BrobridgeOrg/gravity-sdk/subscriber"
 	gravity_state_store "github.com/BrobridgeOrg/gravity-sdk/subscriber/state_store"
+	gravity_sdk_types_record "github.com/BrobridgeOrg/gravity-sdk/types/record"
 
 	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
@@ -63,19 +64,26 @@ func (subscriber *Subscriber) processData(msg *gravity_subscriber.Message) error
 			log.Info(id)
 		}
 	*/
+	packet := packetPool.Get().(*Packet)
 
 	event := msg.Payload.(*gravity_subscriber.DataEvent)
-	pj := event.Payload
+	record := event.Payload
 
 	// Getting channels for specific collection
-	restRules, ok := subscriber.ruleConfig.Subscriptions[pj.Collection]
+	restRules, ok := subscriber.ruleConfig.Subscriptions[record.Table]
 	if !ok {
 		// skip
 		return nil
 	}
 
-	// Convert projection to record
-	payload, err := pj.ToJSON()
+	fields := record.GetFields()
+	payload := gravity_sdk_types_record.ConvertFieldsToMap(fields)
+
+	packet.EventName = record.EventName
+	packet.Payload = payload
+	packet.Collection = record.Table
+
+	newPacket, err := jsoniter.Marshal(packet)
 	if err != nil {
 		return err
 	}
@@ -89,7 +97,7 @@ func (subscriber *Subscriber) processData(msg *gravity_subscriber.Message) error
 
 		for {
 			// Create a request
-			request, err := http.NewRequest(method, uri, bytes.NewReader(payload))
+			request, err := http.NewRequest(method, uri, bytes.NewReader(newPacket))
 			if err != nil {
 				log.Error(err)
 				<-time.After(time.Second * 5)
@@ -128,6 +136,8 @@ func (subscriber *Subscriber) processData(msg *gravity_subscriber.Message) error
 				<-time.After(time.Second * 5)
 				continue
 			}
+
+			packetPool.Put(packet)
 			break
 		}
 
@@ -333,7 +343,8 @@ func (subscriber *Subscriber) snapshotHandler(msg *gravity_subscriber.Message) {
 		// TODO: using batch mechanism to improve performance
 		packet := packetPool.Get().(*Packet)
 		for {
-			payload := snapshotRecord.Payload.AsMap()
+			fields := snapshotRecord.Payload.Map.Fields
+			payload := gravity_sdk_types_record.ConvertFieldsToMap(fields)
 
 			packet.EventName = "snapshot"
 			packet.Payload = payload
